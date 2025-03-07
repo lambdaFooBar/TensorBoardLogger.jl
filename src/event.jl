@@ -9,12 +9,12 @@ SummaryCollection(summary::GraphDef; kwargs...) = summary
 function make_event(logger::TBLogger, summary::Summary; step=TensorBoardLogger.step(logger))
     step = typeof(step) == Nothing ?  TensorBoardLogger.step(logger) : step
     source_metadata=Ref{Union{Nothing, SourceMetadata}}(nothing)
-    return Event(time(), step, OneOf(:summary, summary), source_metadata[])
+    return Event(get_time(logger), step, OneOf(:summary, summary), source_metadata[])
 end
 function make_event(logger::TBLogger, summary::GraphDef; step=TensorBoardLogger.step(logger))
     step = typeof(step) == Nothing ?  TensorBoardLogger.step(logger) : step
     source_metadata=Ref{Union{Nothing, SourceMetadata}}(nothing)
-    Event(time(), step, OneOf(:graph_def, serialize_proto(summary)), source_metadata[])
+    Event(get_time(logger), step, OneOf(:graph_def, serialize_proto(summary)), source_metadata[])
 end
 
 """

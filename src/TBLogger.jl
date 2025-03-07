@@ -1,3 +1,7 @@
+abstract type LoggingTimeProvider end
+struct RealTimeProvider <: LoggingTimeProvider end
+get_time(::LoggingTimeProvider) = time()
+
 mutable struct TBLogger{P,S} <: AbstractLogger
     logdir::P
     file::S
@@ -5,18 +9,21 @@ mutable struct TBLogger{P,S} <: AbstractLogger
     global_step::Int
     step_increment::Int
     min_level::LogLevel
+    time_provider::LoggingTimeProvider
 
     function TBLogger{P,S}(logdir::P,
                            file::S,
                            all_files::Dict{String, S},
                            global_step::Int,
                            step_increment::Int,
-                           min_level::LogLevel) where {P,S}
-        lg = new{P, S}(logdir, file, all_files, global_step, step_increment, min_level)
+                           min_level::LogLevel,
+                           time_provider::LoggingTimeProvider) where {P,S}
+        lg = new{P, S}(logdir, file, all_files, global_step, step_increment, min_level, time_provider)
         return Base.finalizer(Base.close, lg)
     end
 end
 
+get_time(lg::TBLogger{P,S}) where {P,S} = get_time(lg.time_provider)
 
 """
     InitPolicy
@@ -29,11 +36,11 @@ export tb_append, tb_overwrite, tb_increment
 
 """
     TBLogger(logdir[, tb_increment]; 
-            time=time(), 
             prefix="",
             purge_step=nothing, 
             step_increment=1, 
-            min_level=Logging.Info)
+            min_level=Logging.Info,
+            time_provider=RealTimeProvider())
 
 Creates a TensorBoardLogger in the folder `logdir`. The second (optional)
 argument specifies the behaviour if the `logdir` already exhists: the default
@@ -51,19 +58,19 @@ by tensorboard (usefull in the case of restarting a crashed computation).
 tensorboard.
 """
 function TBLogger(logdir="tensorboard_logs/run", overwrite=tb_increment;
-                  time=time(),
                   prefix="",
                   purge_step::Union{Int,Nothing}=nothing,
                   step_increment = 1, 
-                  min_level::LogLevel=Info)
+                  min_level::LogLevel=Info,
+                  time_provider::LoggingTimeProvider=RealTimeProvider())
 
     logdir = init_logdir(logdir, overwrite)
-    fpath, evfile = create_eventfile(logdir, purge_step, time; prepend = prefix)
+    fpath, evfile = create_eventfile(logdir, get_time(time_provider), purge_step; prepend = prefix)
 
     all_files  = Dict(fpath => evfile)
     start_step = something(purge_step, 0)
 
-    TBLogger{typeof(logdir), typeof(evfile)}(logdir, evfile, all_files, start_step, step_increment, min_level)
+    TBLogger{typeof(logdir), typeof(evfile)}(logdir, evfile, all_files, start_step, step_increment, min_level, time_provider)
 end
 
 """
@@ -87,7 +94,6 @@ function init_logdir(logdir, overwrite=tb_increment)
             i=1
             while i<1000 # avoids an infinite loop
                 logdir_new = logdir*"_$i"
-                #println("trying $logdir_new")
                 !ispath(logdir_new) && break
                 i+=1
             end
@@ -100,7 +106,7 @@ function init_logdir(logdir, overwrite=tb_increment)
 end
 
 """
-    create_eventfile(logdir, [purge_step=nothing; time=time()]) -> IO
+    create_eventfile(logdir, time, [purge_step=nothing]) -> IO
 
 Creates a protobuffer events file in the logdir and returns the IO buffer for
 writing to it. If `purge_step::Int` is passed then a special event is written
@@ -110,7 +116,7 @@ part of a calculation that crashed).
 Optional keyword argument `prepend` can be passed to prepend a path to the file
 name.
 """
-function create_eventfile(logdir, purge_step=nothing, time=time(); prepend="")
+function create_eventfile(logdir, time, purge_step=nothing; prepend="")
     hostname = gethostname()
     fname    = prepend*"events.out.tfevents.$time.$hostname"
     fpath    = joinpath(logdir, fname)
@@ -140,7 +146,7 @@ Adds an event file to `lg` with `path` prepended to its name. It can be used
 to create sub-event collection in a single event collection.
 """
 function add_eventfile(lg::TBLogger, path="")
-    fname, file = create_eventfile(logdir(lg); prepend=path)
+    fname, file = create_eventfile(logdir(lg), get_time(lg); prepend=path)
     lg.all_files[fname] = file
     return fname
 end
@@ -258,10 +264,8 @@ function CoreLogging.handle_message(lg::TBLogger, level, message, _module, group
     # Unpack the message
     summ    = SummaryCollection()
     i_step = lg.step_increment # :log_step_increment default value
-
     if !isempty(kwargs)
         data = Vector{Pair{String,Any}}()
-
         # ∀ (k-v) pairs, decompose values into objects that can be serialized
         for (key,val) in pairs(kwargs)
             # special key describing step increment

@@ -132,3 +132,25 @@ end
     TensorBoardLogger.log_value(tbl, "test", 1.0)
     @test length(TensorBoardLogger.events(tbl)) == 2 # creation event + log_value
 end
+
+
+@testset "time_provider_external" begin
+    mutable struct SettableTimeProvider <: TensorBoardLogger.LoggingTimeProvider
+        time::Float64
+    end
+    TensorBoardLogger.get_time(lg::SettableTimeProvider) = lg.time
+
+    tp = SettableTimeProvider(0.0)
+    tbl = TBLogger(test_log_dir*"run", tb_overwrite; time_provider=tp)
+    TensorBoardLogger.log_value(tbl, "msg", 1.0)
+    
+    #Change time
+    tp.time = 2.3
+    TensorBoardLogger.log_value(tbl, "newmsg", 1.0)
+    
+    expected_wall_times = [0.0, 0.0, 2.3] #first one is the creation event
+    for (expected_wall_time, ev) in zip(expected_wall_times, TensorBoardLogger.events(tbl))
+        @test ev.wall_time == expected_wall_time
+    end
+end
+

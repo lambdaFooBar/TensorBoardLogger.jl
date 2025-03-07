@@ -266,7 +266,7 @@ end
 
 
 """
-    map_summaries(fun, path; purge=true, steps=all)
+    map_events(fun, path; purge=true, steps=all)
 
 Maps the function `fun(event)` on all the event logged to the folder
 at `path`. The function is called sequentially, starting from the first
